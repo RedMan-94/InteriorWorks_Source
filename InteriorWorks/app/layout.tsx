@@ -2,12 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Interior Works — Design & Material Studio",
-  description: "Plan interior units, calculate materials, and make every sheet count.",
-  icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-  },
+  title: "Sage & Salt — Seasonal Kitchen",
+  description: "Season-led dishes, locally sourced and made for sharing.",
 };
 
 export default function RootLayout({
@@ -17,7 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

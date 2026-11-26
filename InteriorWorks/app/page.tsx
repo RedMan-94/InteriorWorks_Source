@@ -1,2 +1,5 @@
-import Studio from './studio';
-export default function Home(){ return <Studio/>; }
+import Restaurant from './restaurant';
+
+export default function Home() {
+  return <Restaurant />;
+}
