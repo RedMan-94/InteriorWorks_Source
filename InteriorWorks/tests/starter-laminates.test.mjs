@@ -1,0 +1,9 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {newProject,demoWorkspace} from '../app/lib/model.ts';
+import {withStarterLaminates} from '../app/lib/starter-laminates.ts';
+import {finishLibraryErrors} from '../app/lib/finishes.ts';
+import {calculate} from '../app/lib/engine.ts';
+test('new projects have ten distinct selectable Laminate 1–10 entries',()=>{const p=newProject('New');assert.deepEqual(p.externalFinishes.map(f=>f.name),Array.from({length:10},(_,i)=>'Laminate '+(i+1)));assert.equal(new Set(p.externalFinishes.map(f=>f.color)).size,10);assert.deepEqual(finishLibraryErrors(p.externalFinishes),[]);assert.deepEqual(calculate(demoWorkspace().projects[0]).errors,[]);});
+test('existing project upgrade preserves custom finishes and component assignments without code or ID collisions',()=>{const p=newProject('Existing');delete p.laminateOptionsVersion;const custom={...p.externalFinishes[0],name:'Client finish',color:'#000000'};p.externalFinishes=[custom];const result=withStarterLaminates(p);assert.equal(result.externalFinishes.length,11);assert.deepEqual(result.externalFinishes[0],custom);assert.equal(p.externalFinishes.length,1);assert.equal(result.units,p.units);assert.deepEqual(finishLibraryErrors(result.externalFinishes),[]);});
+test('upgrades reuse existing Laminate names, and never restore user-renamed or deleted starter options',()=>{const p=newProject('Existing');delete p.laminateOptionsVersion;p.externalFinishes=p.externalFinishes.slice(0,1);const result=withStarterLaminates(p);assert.equal(result.externalFinishes.length,10);result.externalFinishes[0].name='My white';result.externalFinishes.pop();assert.equal(withStarterLaminates(result),result);assert.equal(result.externalFinishes.length,9);assert.equal(result.externalFinishes[0].name,'My white');});

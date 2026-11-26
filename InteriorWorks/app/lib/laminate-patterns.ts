@@ -1,0 +1,62 @@
+import type {ExternalFinish,FaceFinish} from './model';
+export type Point={x:number,y:number};
+export type Polygon=Point[];
+export type PatternStrip={position:number,width:number};
+export type PatternBorder={inset:number,width:number};
+export type LaminatePattern={preset:number,strips:PatternStrip[],vertical:PatternStrip[],borders:PatternBorder[],angle:number,columns:number,rows:number,cutsX?:number[],cutsY?:number[],cellWidth:number,cellHeight:number,offsetX:number,offsetY:number,centerX:number,centerY:number,radii:number[],finishes:Record<string,string>};
+export type PatternRegion={id:string,label:string,polygons:Polygon[],combined?:boolean,finishId?:string};
+export const patternNames=['Plain','One horizontal strip','Two horizontal strips','Three horizontal strips','One vertical strip','Two vertical strips','Three vertical strips','One slant strip','Two slant strips','Three slant strips','One border','Two borders','Three borders','One horizontal + one vertical strip','Two horizontal + two vertical strips','Three horizontal + three vertical strips','Rectangular grid','Diamond lattice','Triangular tessellation','Concentric arcs'];
+const E=1e-8;
+export const polygonArea=(p:Polygon)=>Math.abs(p.reduce((s,a,i)=>{const b=p[(i+1)%p.length];return s+a.x*b.y-b.x*a.y;},0))/2;
+export const polygonPerimeter=(p:Polygon)=>p.reduce((s,a,i)=>{const b=p[(i+1)%p.length];return s+Math.hypot(a.x-b.x,a.y-b.y);},0);
+export const rectangle=(x:number,y:number,w:number,h:number):Polygon=>[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h}];
+export function bounds(ps:Polygon[]){const points=ps.flat();if(!points.length)return{x:0,y:0,w:0,h:0};const x=Math.min(...points.map(p=>p.x)),y=Math.min(...points.map(p=>p.y));return{x,y,w:Math.max(...points.map(p=>p.x))-x,h:Math.max(...points.map(p=>p.y))-y};}
+// Sutherland–Hodgman clipping against a half plane; all generated cells are convex.
+export function halfPlane(poly:Polygon,nx:number,ny:number,d:number){const out:Polygon=[];if(!poly.length)return out;let a=poly[poly.length-1],av=nx*a.x+ny*a.y-d;for(const b of poly){const bv=nx*b.x+ny*b.y-d,ai=av<=E,bi=bv<=E;if(ai!==bi){const t=av/(av-bv);out.push({x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)});}if(bi)out.push(b);a=b;av=bv;}return out.filter((p,i)=>!i||Math.hypot(p.x-out[i-1].x,p.y-out[i-1].y)>E);}
+export function clipRect(p:Polygon,r:{x:number,y:number,w:number,h:number}){for(const [nx,ny,d] of [[-1,0,-r.x],[1,0,r.x+r.w],[0,-1,-r.y],[0,1,r.y+r.h]])p=halfPlane(p,nx,ny,d);return polygonArea(p)>E?p:[];}
+export function patternDefaults(preset:number,w:number,h:number):LaminatePattern{
+ const n=preset>=2&&preset<=4?preset-1:preset>=5&&preset<=7?preset-4:preset>=8&&preset<=10?preset-7:preset>=11&&preset<=13?preset-10:preset>=14&&preset<=16?preset-13:0;
+ const run=preset>=5&&preset<=7?w:preset>=8&&preset<=10?w*Math.sin(35*Math.PI/180)+h*Math.cos(35*Math.PI/180):h;
+ return {preset,strips:Array.from({length:n},(_,i)=>({position:run*(i+1)/(n+1),width:run/(n+1)*.16})),vertical:Array.from({length:preset>=14&&preset<=16?n:0},(_,i)=>({position:w*(i+1)/(n+1),width:w/(n+1)*.16})),borders:Array.from({length:preset>=11&&preset<=13?n:0},(_,i)=>({inset:Math.min(w,h)*(.06+i*.12),width:Math.min(w,h)*.035})),angle:35,columns:3,rows:2,cutsX:[w/3,2*w/3],cutsY:[h/2],cellWidth:w/3,cellHeight:h/3,offsetX:0,offsetY:0,centerX:0,centerY:0,radii:[.25,.5,.75].map(v=>v*Math.hypot(w,h)),finishes:{}};
+}
+export function patternErrors(p:LaminatePattern,w:number,h:number,finishes:ExternalFinish[]=[]){
+ const errors:string[]=[];if(!Number.isInteger(p.preset)||p.preset<1||p.preset>20)return['Choose one of the 20 laminate patterns.'];
+ const numbers=[p.angle,p.columns,p.rows,p.cellWidth,p.cellHeight,p.offsetX,p.offsetY,p.centerX,p.centerY,...(p.strips||[]).flatMap(s=>[s.position,s.width]),...(p.vertical||[]).flatMap(s=>[s.position,s.width]),...(p.borders||[]).flatMap(b=>[b.inset,b.width]),...(p.radii||[]),...(p.cutsX||[]),...(p.cutsY||[])];if(!numbers.every(Number.isFinite))return['Pattern measurements must be finite numbers.'];
+ const count=p.preset<=4?p.preset-1:p.preset<=7?p.preset-4:p.preset<=10?p.preset-7:p.preset<=13?p.preset-10:p.preset<=16?p.preset-13:0;
+ if(p.preset>=2&&p.preset<=10||p.preset>=14&&p.preset<=16){if(p.strips?.length!==count)errors.push('Keep the selected number of strips.');if(p.preset>=14&&p.vertical?.length!==count)errors.push('Keep the selected number of vertical strips.');
+ const angle=p.angle*Math.PI/180,nx=-Math.sin(angle),ny=Math.cos(angle),qs=rectangle(0,0,w,h).map(q=>q.x*nx+q.y*ny),run=p.preset>=5&&p.preset<=7?w:p.preset>=8&&p.preset<=10?Math.max(...qs)-Math.min(...qs):h;
+ for(const [ss,limit] of [[p.strips,run],[p.vertical,w]] as [PatternStrip[],number][]){for(const s of ss||[])if(s.width<=0||s.position-s.width/2< -E||s.position+s.width/2>limit+E)errors.push('Keep strips inside the face; position measures their centre.');for(let i=0;i<(ss||[]).length;i++)for(let j=i+1;j<ss.length;j++)if(Math.abs(ss[i].position-ss[j].position)<(ss[i].width+ss[j].width)/2-E)errors.push('Parallel strips must not overlap.');}}
+ if(p.preset>=11&&p.preset<=13){if(p.borders?.length!==count)errors.push('Keep the selected number of borders.');for(const b of p.borders||[])if(b.inset<0||b.width<=0||2*(b.inset+b.width)>=Math.min(w,h))errors.push('Borders must leave a positive centre region.');const a=[...(p.borders||[])].sort((a,b)=>a.inset-b.inset);for(let i=1;i<a.length;i++)if(a[i].inset<a[i-1].inset+a[i-1].width-E)errors.push('Borders must not overlap.');}
+ if(p.preset===17){for(const [cuts,count,max] of [[p.cutsX,p.columns,w],[p.cutsY,p.rows,h]] as [number[]|undefined,number,number][]){if(cuts&&(cuts.length!==count-1||cuts.some((v,i)=>v<=0||v>=max||(i>0&&v<=cuts[i-1]))))errors.push('Keep grid division positions in increasing order inside the face.');}}
+ if(p.preset===17&&(!Number.isInteger(p.rows)||!Number.isInteger(p.columns)||p.rows<1||p.columns<1||p.rows>12||p.columns>12))errors.push('Grid rows and columns must be whole numbers from 1 to 12.');
+ if((p.preset===18||p.preset===19)&&(p.cellWidth<=0||p.cellHeight<=0||(w/p.cellWidth+4)*(h/p.cellHeight+4)>400||(p.preset===18&&(w/p.cellWidth+h/p.cellHeight+2)**2>800)))errors.push('Increase the cell dimensions to keep this pattern below 400 cells.');
+ if(p.preset===20&&(!p.radii?.length||p.radii.length>8||p.radii.some((r,i)=>r<=0||(i>0&&r<=p.radii[i-1]))))errors.push('Use 1–8 positive radii in increasing order.');
+ if(Object.values(p.finishes||{}).some(id=>id&&!finishes.some(f=>f.id===id)))errors.push('A pattern region uses a removed laminate. Choose a replacement.');return [...new Set(errors)];
+}
+export function patternRegions(p:LaminatePattern,w:number,h:number):PatternRegion[]{
+ if(!(w>0&&h>0)||patternErrors(p,w,h,Object.values(p.finishes||{}).map(id=>({id} as ExternalFinish))).length)return [];
+ const out:PatternRegion[]=[],face=rectangle(0,0,w,h),put=(id:string,label:string,polygons:Polygon[],combined=false)=>{polygons=polygons.filter(a=>polygonArea(a)>E);if(polygons.length)out.push({id,label,polygons,combined,finishId:p.finishes?.[id]});};
+ if(p.preset===1)put('plain','Plain',[face]);
+ else if(p.preset>=2&&p.preset<=10){
+ const angle=p.angle*Math.PI/180,nx=p.preset<=4?0:p.preset<=7?1:-Math.sin(angle),ny=p.preset<=4?1:p.preset<=7?0:Math.cos(angle),qs=face.map(q=>q.x*nx+q.y*ny),min=Math.min(...qs),max=Math.max(...qs),ss=p.strips.map((s,i)=>({...s,i})).sort((a,b)=>a.position-b.position);let last=min,gap=0;
+ for(const s of ss){const lo=min+s.position-s.width/2,hi=lo+s.width;put('gap-'+gap,'Background '+(++gap),[halfPlane(halfPlane(face,-nx,-ny,-last),nx,ny,lo)]);put('strip-'+s.i,'Strip '+(s.i+1),[halfPlane(halfPlane(face,-nx,-ny,-lo),nx,ny,hi)]);last=hi;}put('gap-'+gap,'Background '+(gap+1),[halfPlane(face,-nx,-ny,-last)]);
+ }else if(p.preset>=11&&p.preset<=13){
+ const ring=(a:number,b:number)=>{const x=a,y=a,W=w-2*a,H=h-2*a,t=b-a;return[rectangle(x,y,W,t),rectangle(x,y+H-t,W,t),rectangle(x,y+t,t,H-2*t),rectangle(x+W-t,y+t,t,H-2*t)];};let last=0;const bs=p.borders.map((b,i)=>({...b,i})).sort((a,b)=>a.inset-b.inset);for(const b of bs){if(b.inset>last+E)put('space-'+b.i,'Space outside border '+(b.i+1),ring(last,b.inset));put('border-'+b.i,'Border '+(b.i+1),ring(b.inset,b.inset+b.width));last=b.inset+b.width;}put('centre','Centre',[rectangle(last,last,w-2*last,h-2*last)]);
+ }else if(p.preset>=14&&p.preset<=16){
+ const intervals=(ss:PatternStrip[],max:number)=>{const out:{lo:number,hi:number,key:string,label:string}[]=[],s=ss.map((s,i)=>({...s,i})).sort((a,b)=>a.position-b.position);let last=0,gap=0;for(const a of s){out.push({lo:last,hi:a.position-a.width/2,key:'g'+gap,label:'background '+(++gap)});out.push({lo:a.position-a.width/2,hi:a.position+a.width/2,key:'s'+a.i,label:'strip '+(a.i+1)});last=a.position+a.width/2;}out.push({lo:last,hi:max,key:'g'+gap,label:'background '+(gap+1)});return out;};
+ for(const x of intervals(p.vertical,w))for(const y of intervals(p.strips,h))if(x.hi-x.lo>E&&y.hi-y.lo>E)put(x.key+'-'+y.key,'Vertical '+x.label+' / horizontal '+y.label,[rectangle(x.lo,y.lo,x.hi-x.lo,y.hi-y.lo)]);
+ }else if(p.preset===17){const xs=[0,...(p.cutsX||Array.from({length:p.columns-1},(_,i)=>w*(i+1)/p.columns)),w],ys=[0,...(p.cutsY||Array.from({length:p.rows-1},(_,i)=>h*(i+1)/p.rows)),h];for(let row=0;row<p.rows;row++)for(let col=0;col<p.columns;col++)put('cell-'+row+'-'+col,'Row '+(row+1)+' · column '+(col+1),[rectangle(xs[col],ys[row],xs[col+1]-xs[col],ys[row+1]-ys[row])]);
+ }else if(p.preset===18){
+ const cw=p.cellWidth,ch=p.cellHeight,origin={x:p.offsetX,y:p.offsetY},uv=face.map(q=>({x:(q.x-origin.x)/cw+(q.y-origin.y)/ch,y:(q.x-origin.x)/cw-(q.y-origin.y)/ch})),umin=Math.floor(Math.min(...uv.map(q=>q.x))),umax=Math.ceil(Math.max(...uv.map(q=>q.x))),vmin=Math.floor(Math.min(...uv.map(q=>q.y))),vmax=Math.ceil(Math.max(...uv.map(q=>q.y)));
+ if((umax-umin)*(vmax-vmin)>800)return[];for(let i=umin;i<umax;i++)for(let j=vmin;j<vmax;j++){const poly=rectangle(i,j,1,1).map(q=>({x:origin.x+cw*(q.x+q.y)/2,y:origin.y+ch*(q.x-q.y)/2})).reverse();put('diamond-'+i+'-'+j,'Diamond '+i+', '+j,[clipRect(poly,{x:0,y:0,w,h})]);}
+ }else if(p.preset===19){const cw=p.cellWidth,ch=p.cellHeight,ox=p.offsetX%cw,oy=p.offsetY%ch;let i=0;for(let row=-2;row<=Math.ceil(h/ch)+1;row++){const y=oy+row*ch,shift=(Math.abs(row)%2)*cw/2,nextShift=(Math.abs(row+1)%2)*cw/2;for(let col=-2;col<=Math.ceil(w/cw)+1;col++){const x=ox+col*cw+shift,dx=nextShift-shift;for(const [k,poly] of [[0,[{x,y},{x:x+cw,y},{x:x+dx+(dx<0?cw:0),y:y+ch}]],[1,[{x:dx>0?x+cw:x,y},{x:x+dx,y:y+ch},{x:x+dx+cw,y:y+ch}]]] as [number,Polygon][]){put('triangle-'+row+'-'+col+'-'+k,'Triangle '+(++i),[clipRect(poly,{x:0,y:0,w,h})]);}}}
+ }else if(p.preset===20){
+ const max=Math.max(...face.map(q=>Math.hypot(q.x-p.centerX,q.y-p.centerY)))+1,rs=[0,...p.radii.filter(r=>r<max),max],steps=Math.min(1024,Math.max(96,Math.ceil(Math.PI*Math.sqrt(max/.01))));for(let band=0;band<rs.length-1;band++){const polys:Polygon[]=[];for(let k=0;k<steps;k++){const a=k*2*Math.PI/steps,b=(k+1)*2*Math.PI/steps,r=rs[band],R=rs[band+1],at=(radius:number,angle:number)=>({x:p.centerX+radius*Math.cos(angle),y:p.centerY+radius*Math.sin(angle)});const poly=clipRect([at(r,a),at(R,a),at(R,b),at(r,b)],{x:0,y:0,w,h});if(poly.length)polys.push(poly);}put('arc-'+band,'Arc region '+(band+1),polys,true);}
+ }
+ return out;
+}
+export const polygonPath=(polys:Polygon[],height:number)=>polys.map(p=>p.map((q,i)=>(i?'L':'M')+q.x+' '+(height-q.y)).join(' ')+'Z').join(' ');
+export function regionColour(region:PatternRegion,index:number,finishes:ExternalFinish[],baseId?:string){return finishes.find(f=>f.id===(region.finishId||baseId))?.color||'#c3a17a';}
+// Cancel shared cell edges so curved regions have only their outer/inner outlines.
+export function boundarySegments(polygons:Polygon[]){const edges=new Map<string,{a:Point,b:Point,count:number}>(),key=(p:Point)=>Math.round(p.x*1e6)+','+Math.round(p.y*1e6);for(const poly of polygons)for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];if(Math.hypot(a.x-b.x,a.y-b.y)<1e-7)continue;const ka=key(a),kb=key(b),id=ka<kb?ka+'|'+kb:kb+'|'+ka;const e=edges.get(id);if(e)e.count++;else edges.set(id,{a,b,count:1});}return [...edges.values()].filter(e=>e.count%2===1);}
+export function placedOutline(q:{cutShape?:Polygon[],fw:number,fh:number,rotated:boolean,x:number,y:number}){const at=(p:Point)=>q.rotated?{x:q.x+1/8+p.y,y:q.y+1/8+p.x}:{x:q.x+1/8+p.x,y:q.y+1/8+q.fh-p.y};return boundarySegments(q.cutShape||[]).map(e=>({a:at(e.a),b:at(e.b)}));}

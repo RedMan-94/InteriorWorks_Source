@@ -1,0 +1,29 @@
+'use client';
+import {useState} from 'react';
+import {Plus,Trash2,ArrowLeft} from 'lucide-react';
+import type {Project,Procurement,MaterialProduct} from './lib/model';
+import type {Result} from './lib/engine';
+import {purchaseLines,starterProducts,lineCost} from './lib/material-procurement';
+
+const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
+
+export function MaterialSelection({project,result,library,onLibraryChange,onChange,onBack,stale}:{project:Project,result:Result,library:Record<string,MaterialProduct[]>,onLibraryChange:(library:Record<string,MaterialProduct[]>)=>void,onChange:(procurement:Procurement)=>void,onBack:()=>void,stale:boolean}){
+ const [editing,setEditing]=useState<string|null>(null);
+ const lines=purchaseLines(result),data=project.procurement||{products:{},selected:{}};
+ const costs=lines.map(line=>lineCost(line,data,library)),priced=costs.filter((cost):cost is number=>cost!==null).reduce((a,b)=>a+b,0),pending=costs.length-costs.filter(cost=>cost!==null).length;
+ const update=(key:string,products:MaterialProduct[],selected?:string)=>{onLibraryChange({...library,[key]:products});if(selected!==undefined)onChange({products:data.products,selected:{...data.selected,[key]:selected}});};
+ const edit=(key:string,id:string,change:Partial<MaterialProduct>)=>{
+  const line=lines.find(l=>l.key===key)!;
+  update(key,(library[key]||data.products[key]||starterProducts(line)).map(p=>p.id===id?{...p,...change}:p));
+ };
+ return <div className="material-selection"><div className="page-heading"><div><p className="eyebrow">PROJECT WORKFLOW · FINAL PHASE</p><h1>Select materials & prices</h1><p className="muted">Choose a company product for every calculated material. Enter your supplier’s price per unit to build a project estimate.</p></div><button className="button" onClick={onBack}><ArrowLeft size={15}/> Back to calculations</button></div>
+ {stale&&<div className="notice warning">The design has changed. Recalculate before relying on these quantities or prices.</div>}
+ <section className="white-card procurement-overview"><div><span>Selected products total</span><strong>{money(priced)}</strong></div><p>{pending} of {lines.length} material lines await a product, price or quantity. This subtotal includes only completed lines and does not include taxes, delivery, fitting or pack rounding.</p></section>
+ <section className="white-card procurement-list"><div className="card-title"><div><h2>Material list</h2><p>Sheet quantities come from cutting layouts; fittings use the calculated consumption. Company products and rates are reusable across your projects.</p></div></div><div className="procurement-rows">{lines.map(line=>{
+  const products=library[line.key]||data.products[line.key]||starterProducts(line),id=data.selected[line.key]||'',selected=products.find(p=>p.id===id),cost=lineCost(line,data,library);
+  return <div className="procurement-row" key={line.key}><div className="procurement-item"><strong>{line.label}</strong><span>{line.quantity===null?'Input required':Number(line.quantity.toFixed(3))+' '+line.unit+(line.quantity===1?'':'')} {line.note&&<small>{line.note}</small>}</span></div><label className="field"><span>Company product</span><select aria-label={'Company product for '+line.label} value={id} onChange={e=>onChange({products:data.products,selected:{...data.selected,[line.key]:e.target.value}})}><option value="">Choose product</option>{products.map(p=><option key={p.id} value={p.id}>{p.company} · {p.name} · {p.price===null?'Set price':money(p.price)+'/'+line.unit}</option>)}</select></label><div className="procurement-price"><span>{selected&&selected.price!==null?money(selected.price)+' / '+line.unit:'Price pending'}</span><strong>{cost===null?'—':money(cost)}</strong></div><div className="procurement-actions"><button className="button small" onClick={()=>setEditing(editing===line.key?null:line.key)}>{editing===line.key?'Close':'Edit products'}</button></div>
+  {editing===line.key&&<div className="procurement-editor"><p className="field-note">Enter the exact company, product specification and price in ₹ per {line.unit}. This product library is available in all your projects.</p>{products.map(p=><div className="procurement-product" key={p.id}><label className="field"><span>Company</span><input aria-label={'Company for '+line.label} value={p.company} onChange={e=>edit(line.key,p.id,{company:e.target.value})}/></label><label className="field"><span>Product / specification</span><input aria-label={'Product for '+line.label} value={p.name} onChange={e=>edit(line.key,p.id,{name:e.target.value})}/></label><label className="field"><span>₹ / {line.unit}</span><input type="number" inputMode="decimal" min="0" step="any" aria-label={'Price for '+p.company+' '+line.label} value={p.price??''} placeholder="Enter rate" onChange={e=>edit(line.key,p.id,{price:e.target.value===''?null:Number(e.target.value)})}/></label><button className="icon-button" title="Remove product" aria-label={'Remove '+p.company+' product'} onClick={()=>update(line.key,products.filter(x=>x.id!==p.id),id===p.id?'':undefined)}><Trash2 size={15}/></button></div>)}<button className="button small" onClick={()=>update(line.key,[...products,{id:crypto.randomUUID(),company:'',name:'',price:null}])}><Plus size={14}/> Add company product</button></div>}</div>;
+ })}</div><div className="procurement-grand-total" aria-live="polite"><div><strong>Grand total</strong><span>{pending?`${pending} of ${lines.length} lines still need a product, price or quantity. Total includes priced lines only.`:'All material lines priced.'}</span></div><strong>{money(priced)}</strong></div></section>
+ <p className="field-note">Prices are entered manually and are not live supplier quotations. Confirm product grade, stock availability, GST and final order quantities before purchasing.</p>
+ </div>;
+}
